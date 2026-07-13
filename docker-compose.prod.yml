@@ -6,8 +6,6 @@ services:
 
   backend:
     image: swr.cn-north-9.myhuaweicloud.com/linkseed/eap-backend:latest
-    ports:
-      - "8080:8080"
     volumes:
       - ./data:/app/data
     environment:
