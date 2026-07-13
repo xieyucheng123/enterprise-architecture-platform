@@ -2,9 +2,11 @@ services:
   frontend:
     image: swr.cn-north-9.myhuaweicloud.com/eap/frontend:latest
     ports:
-      - "443:443"
+      - "80:80"
 
   backend:
     image: swr.cn-north-9.myhuaweicloud.com/eap/backend:latest
+    volumes:
+      - ./data:/app/data
     environment:
-      - APP__BACKEND=llm
+      - APP_LLM__BACKEND=llm

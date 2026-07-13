@@ -20,7 +20,7 @@ services:
     environment:
       - RUST_LOG=info
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -28,6 +28,7 @@ services:
 
   litestream:
     image: litestream/litestream:latest
+    command: replicate
     volumes:
       - ./data:/data
       - ./litestream.yml:/etc/litestream.yml
