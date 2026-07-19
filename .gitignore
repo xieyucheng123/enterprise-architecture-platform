@@ -1,7 +1,16 @@
+# Rust build artifacts
 /target
+**/target
+*.rs.bk
+
+# Database files
 /data
 *.db
 *.db-shm
 *.db-wal
+
+# Environment & local config
 .env
+
+# Built binaries
 server-bin
