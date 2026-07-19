@@ -24,7 +24,7 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository_owner }}/eap-backend
         run: |
           IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
-          docker build -t "${IMAGE_LC}:latest" -t "${IMAGE_LC}:${{ github.sha }}" .
+          docker build -t "${IMAGE_LC}:latest" -t "${IMAGE_LC}:${{ github.sha }}" ./backend
           docker push "${IMAGE_LC}:latest"
           docker push "${IMAGE_LC}:${{ github.sha }}"
 
