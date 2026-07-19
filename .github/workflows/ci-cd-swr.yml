@@ -1,0 +1,227 @@
+name: Build and Push to SWR
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Get SWR login token
+        id: swr-auth
+        env:
+          HW_AK: ${{ secrets.HW_AK }}
+          HW_SK: ${{ secrets.HW_SK }}
+        run: |
+          # 用 AK/SK 获取 SWR 临时登录凭证
+          # 华为云 IAM 获取临时 token
+          TOKEN_RESPONSE=$(curl -s -X POST "https://iam.cn-north-9.myhuaweicloud.com/v3/auth/tokens" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "auth": {
+                "identity": {
+                  "methods": ["access_key"],
+                  "access_key": {
+                    "ak": "'"$HW_AK"'",
+                    "sk": "'"$HW_SK"'"
+                  }
+                },
+                "scope": {
+                  "project": {
+                    "name": "cn-north-9"
+                  }
+                }
+              }
+            }')
+          
+          # 从响应头获取 token
+          # 如果 IAM access_key 方式不可用，用 SWR 直接认证
+          # SWR 用 AK/SK 签名方式获取长期凭证
+          SWR_DOMAIN="swr.cn-north-9.myhuaweicloud.com"
+          
+          # 用华为云 SDK 获取 SWR 登录凭证
+          pip3 install huaweicloudsdkcore huaweicloudsdkiam huaweicloudsdkswr 2>/dev/null
+          
+          python3 << 'PYEOF'
+          import os, json, subprocess, hmac, hashlib, base64, datetime, urllib.request
+
+          ak = os.environ["HW_AK"]
+          sk = os.environ["HW_SK"]
+          region = "cn-north-9"
+          swr_endpoint = f"swr.{region}.myhuaweicloud.com"
+
+          # 用 SWR API 获取长期登录凭证
+          # 构造华为云 V4 签名
+          def sign_request(method, uri, headers, body=b""):
+              now = datetime.datetime.utcnow()
+              date_short = now.strftime("%Y%m%d")
+              datetime_str = now.strftime("%Y%m%dT%H%M%SZ")
+              
+              headers["X-Sdk-Date"] = datetime_str
+              
+              # Canonical request
+              signed_headers = sorted(headers.keys())
+              canonical_headers = "".join(f"{k.lower()}:{headers[k]}\n" for k in signed_headers)
+              header_keys = ";".join(k.lower() for k in signed_headers)
+              
+              canonical = f"{method}\n{uri}\n\n{canonical_headers}\n{header_keys}\n" + hashlib.sha256(body).hexdigest()
+              
+              # String to sign
+              string_to_sign = f"SDK-HMAC-SHA256\n{datetime_str}\n" + hashlib.sha256(canonical.encode()).hexdigest()
+              
+              # Signature
+              signature = hmac.new(sk.encode(), string_to_sign.encode(), hashlib.sha256).hexdigest()
+              
+              headers["Authorization"] = f"SDK-HMAC-SHA256 Access={ak}, SignedHeaders={header_keys}, Signature={signature}"
+              return headers
+
+          # 获取 SWR 长期凭证
+          uri = "/v2/manage/projects/cn-north-9/instances"
+          headers = {"Host": swr_endpoint, "Content-Type": "application/json"}
+          headers = sign_request("GET", uri, headers)
+          
+          # 直接用 SWR API 获取用户登录凭证
+          # 更简单的方式：用 hcloud 或直接用 AK/SK 生成 SWR 认证
+          # SWR 长期凭证格式: {namespace}@{domain}:{password}
+          # 我们用 IAM token 方式
+
+          # 获取 IAM token
+          iam_body = json.dumps({
+              "auth": {
+                  "identity": {
+                      "methods": ["access_key"],
+                      "access_key": {"ak": ak, "sk": sk}
+                  },
+                  "scope": {"project": {"name": "cn-north-9"}}
+              }
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://iam.cn-north-9.myhuaweicloud.com/v3/auth/tokens",
+              data=iam_body,
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          
+          try:
+              with urllib.request.urlopen(req, timeout=15) as resp:
+                  token = resp.headers["X-Subject-Token"]
+              
+              # 用 token 获取 SWR 登录凭证
+              swr_body = json.dumps({"auth": {"identity": {"methods": ["token"], "token": {"id": token}}}})
+              req2 = urllib.request.Request(
+                  f"https://{swr_endpoint}/v2/manage/projects/cn-north-9/instances",
+                  headers={"Content-Type": "application/json", "X-Auth-Token": token},
+                  method="GET"
+              )
+              with urllib.request.urlopen(req2, timeout=15) as resp2:
+                  pass
+              
+              # 获取 SWR 用户长期凭证
+              req3 = urllib.request.Request(
+                  f"https://{swr_endpoint}/v2/manage/projects/cn-north-9/instances/usertoken",
+                  headers={"Content-Type": "application/json", "X-Auth-Token": token},
+                  method="GET"
+              )
+              with urllib.request.urlopen(req3, timeout=15) as resp3:
+                  cred = json.load(resp3)
+                  print(f"SWR credential keys: {list(cred.keys())}")
+                  
+              # 输出到 GITHUB_ENV
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"swr-domain={swr_endpoint}\n")
+          except Exception as e:
+              print(f"Error: {e}")
+              # Fallback: use AK/SK directly with docker login
+              # SWR supports AK/SK based login
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write(f"swr-domain={swr_endpoint}\n")
+          PYEOF
+
+      - name: Login to SWR
+        env:
+          HW_AK: ${{ secrets.HW_AK }}
+          HW_SK: ${{ secrets.HW_SK }}
+          SWR_DOMAIN: swr.cn-north-9.myhuaweicloud.com
+        run: |
+          # SWR 用 AK/SK 签名获取临时登录凭证
+          python3 << 'PYEOF' > /tmp/swr_login.sh
+          import os, json, urllib.request, hmac, hashlib, base64, datetime
+
+          ak = os.environ["HW_AK"]
+          sk = os.environ["HW_SK"]
+          swr_domain = os.environ["SWR_DOMAIN"]
+
+          # 获取 IAM token
+          iam_body = json.dumps({
+              "auth": {
+                  "identity": {
+                      "methods": ["access_key"],
+                      "access_key": {"ak": ak, "sk": sk}
+                  },
+                  "scope": {"project": {"name": "cn-north-9"}}
+              }
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://iam.cn-north-9.myhuaweicloud.com/v3/auth/tokens",
+              data=iam_body,
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          with urllib.request.urlopen(req, timeout=15) as resp:
+              token = resp.headers["X-Subject-Token"]
+
+          # 获取 SWR 临时登录凭证
+          req2 = urllib.request.Request(
+              f"https://{swr_domain}/v2/manage/projects/cn-north-9/instances/usertoken",
+              headers={"Content-Type": "application/json", "X-Auth-Token": token},
+              method="GET"
+          )
+          with urllib.request.urlopen(req2, timeout=15) as resp2:
+              cred = json.load(resp2)
+              # SWR 返回 {auths: {domain: {auth: base64}}}
+              auths = cred.get("auths", {})
+              for domain, info in auths.items():
+                  auth_b64 = info["auth"]
+                  auth_decoded = base64.b64decode(auth_b64).decode()
+                  username, password = auth_decoded.split(":", 1)
+                  print(f'export SWR_USER="{username}"')
+                  print(f'export SWR_PASS="{password}"')
+                  print(f'export SWR_DOMAIN="{domain}"')
+                  break
+          PYEOF
+
+          source /tmp/swr_login.sh
+          echo "SWR_USER=$SWR_USER"
+          echo "Logging into $SWR_DOMAIN..."
+          docker login "$SWR_DOMAIN" -u "$SWR_USER" -p "$SWR_PASS"
+
+      - name: Build and push Docker image
+        env:
+          SWR_DOMAIN: swr.cn-north-9.myhuaweicloud.com
+          SWR_NAMESPACE: yiban
+          IMAGE_NAME: ${{ github.event.repository.name }}
+        run: |
+          TAG="${{ github.sha }}"
+          IMAGE="${SWR_DOMAIN}/${SWR_NAMESPACE}/${IMAGE_NAME}"
+          
+          echo "Building ${IMAGE}:${TAG}"
+          docker build -t "${IMAGE}:${TAG}" -t "${IMAGE}:latest" .
+          
+          echo "Pushing to SWR..."
+          docker push "${IMAGE}:${TAG}"
+          docker push "${IMAGE}:latest"
+          
+          echo "✅ Image pushed: ${IMAGE}:${TAG}"
+          echo "✅ Image pushed: ${IMAGE}:latest"

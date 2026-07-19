@@ -1,0 +1,22 @@
+name: PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: OpenHands/extensions/plugins/pr-review@main
+        with:
+          llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
+          llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
+          llm-api-key: ${{ secrets.LLM_API_KEY }}
+          github-token: ${{ secrets.PAT_TOKEN }}
