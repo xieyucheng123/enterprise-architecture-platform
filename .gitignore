@@ -1,7 +1,0 @@
-/target
-/data
-*.db
-*.db-shm
-*.db-wal
-.env
-server-bin

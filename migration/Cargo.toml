@@ -1,9 +1,0 @@
-[package]
-name = "migration"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-
-[dependencies]
-sea-orm-migration.workspace = true
-tokio.workspace = true
