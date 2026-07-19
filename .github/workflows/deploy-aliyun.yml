@@ -1,9 +1,15 @@
-name: Build and Push (ACR + ECS)
+name: Build and Push (ACR + OSS)
 
 # 两段式流水线:
-# 阶段1 GitHub Actions: build 后端→push ACR, build 前端→scp ECS
-# 阶段2 ECS systemd timer: 自动轮询 ACR 拉取新镜像部署后端
-# 前端由 ECS 上 python http.server (port 80) serve, CDN www→ECS:80
+# 阶段1 GitHub Actions:
+#   后端 build → push ACR → 触发阿里云云效 Flow (SSH ECS pull+restart)
+#   前端 build → upload OSS (CDN www→OSS 私有回源)
+# 阶段2 阿里云云效 Flow (pipelineId=5143756):
+#   SSH ECS → podman pull ACR → restart → health check
+#
+# 访问:
+#   www.xieyucheng.top → CDN → OSS (私有回源) → 前端
+#   api.xieyucheng.top → CDN → ECS:8080 → 后端
 
 on:
   push:
@@ -13,9 +19,11 @@ on:
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
+  OSS_REGION: cn-shenzhen
+  OSS_BUCKET: eap-frontend-xyc
 
 jobs:
-  # ==================== 后端: Build → Push ACR ====================
+  # ==================== 后端: Build → Push ACR → 触发云效 Flow ====================
   build-backend:
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +52,7 @@ jobs:
             --pipelineId 5143756
         continue-on-error: true
 
-  # ==================== 前端: Build → SCP to ECS ====================
+  # ==================== 前端: Build → Upload OSS (CDN 私有回源) ====================
   build-frontend:
     runs-on: ubuntu-latest
     steps:
@@ -65,12 +73,15 @@ jobs:
           VITE_API_URL: https://api.xieyucheng.top/api
         run: npm run build
 
-      - name: Deploy to ECS via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ECS_HOST }}
-          username: root
-          key: ${{ secrets.ECS_SSH_KEY }}
-          source: "frontend/dist/*"
-          target: "/opt/eap/frontend"
-          strip_components: 2
+      - name: Install ossutil
+        run: |
+          curl -L -o ossutil https://gosspublic.alicdn.com/ossutil/1.7.18/ossutil64
+          chmod +x ossutil && sudo mv ossutil /usr/local/bin/ossutil
+
+      - name: Sync to OSS
+        run: |
+          ossutil config \
+            -e "oss-${{ env.OSS_REGION }}.aliyuncs.com" \
+            -i "${{ secrets.ALIYUN_ACCESS_KEY_ID }}" \
+            -k "${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}"
+          ossutil cp -rf frontend/dist/ "oss://${{ env.OSS_BUCKET }}/"
