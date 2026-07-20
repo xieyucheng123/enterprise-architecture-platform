@@ -51,6 +51,24 @@ jobs:
           curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
             "http://flow-openapi.aliyun.com/pipeline/webhook/aUrhAsquLLleA9SyBA0t"
 
+      - name: Clean old ACR tags (keep latest 3)
+        run: |
+          # 列出所有 tag（除 latest），按时间排序，删除旧的
+          TAGS=$(docker image ls --format "{{.Tag}}" "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend" | grep -v latest | sort)
+          COUNT=$(echo "$TAGS" | grep -c . || true)
+          echo "Current tags (excl latest): $COUNT"
+          if [ "$COUNT" -gt 3 ]; then
+            OLD=$(echo "$TAGS" | head -n $((COUNT - 3)))
+            for TAG in $OLD; do
+              echo "Deleting old tag: $TAG"
+              # ACR 个人版 REST API 删除 tag
+              curl -s -X DELETE \
+                "https://${{ env.ACR_REGISTRY }}/v2/${{ env.ACR_NAMESPACE }}/backend/manifests/$TAG" \
+                -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                -u "${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}" || true
+            done
+          fi
+
   # ==================== 前端: Build → Upload OSS → Object 公共读 ====================
   build-frontend:
     runs-on: ubuntu-latest
