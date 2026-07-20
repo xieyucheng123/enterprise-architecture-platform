@@ -32,11 +32,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           VERDICT="UNKNOWN"
+          REVIEW_BODY=""
           for i in 1 2 3 4 5 6; do
             sleep 5
-            VERDICT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
-              --jq '[.[] | select(.user.login == "github-actions[bot]")] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
-            if [ "$VERDICT" != "null" ] && [ "$VERDICT" != "UNKNOWN" ]; then
+            REVIEW_JSON=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+              --jq '[.[] | select(.user.login == "github-actions[bot]")] | sort_by(.submitted_at) | last | {state: .state, body: .body}' 2>/dev/null || echo "{}")
+            VERDICT=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('state','UNKNOWN'))" 2>/dev/null || echo "UNKNOWN")
+            if [ "$VERDICT" != "null" ] && [ "$VERDICT" != "UNKNOWN" ] && [ -n "$VERDICT" ]; then
+              REVIEW_BODY=$(echo "$REVIEW_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('body',''))" 2>/dev/null || echo "")
               break
             fi
             echo "Retry $i: verdict not ready yet ($VERDICT)"
@@ -44,11 +47,19 @@ jobs:
 
           echo "Latest AI review verdict: $VERDICT"
 
-          if [ "$VERDICT" = "APPROVED" ] || [ "$VERDICT" = "COMMENTED" ]; then
-            echo "AI review passed (verdict: $VERDICT)"
+          if [ "$VERDICT" = "APPROVED" ]; then
+            echo "AI approved the PR"
           elif [ "$VERDICT" = "CHANGES_REQUESTED" ]; then
             echo "::error::AI requested changes, blocking merge"
             exit 1
+          elif [ "$VERDICT" = "COMMENTED" ]; then
+            if echo "$REVIEW_BODY" | grep -qE '🔴|🟠'; then
+              echo "::error::AI review has Critical/Important issues, blocking merge"
+              echo "Review body: $REVIEW_BODY"
+              exit 1
+            else
+              echo "AI review has no Critical/Important issues, passing"
+            fi
           else
             echo "::error::No AI review found (got: $VERDICT)"
             exit 1
