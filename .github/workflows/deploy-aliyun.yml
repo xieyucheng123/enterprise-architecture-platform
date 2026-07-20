@@ -48,7 +48,7 @@ jobs:
 
       - name: Trigger Aliyun Flow pipeline
         run: |
-          curl -s -X POST \
+          curl -s --fail -X POST \
             "https://devops.cn-hangzhou.aliyuncs.com/organization/68c5519cf9c52e7d8c25f677/pipelines/5143756/run" \
             -H "yunxiao-access-token: ${{ secrets.YUNXIAO_ACCESS_TOKEN }}" \
             -H "Content-Type: application/json" \
