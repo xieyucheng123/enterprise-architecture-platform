@@ -9,16 +9,16 @@ function ProtectedRoute() {
 
 export const router = createBrowserRouter([
   {
+    path: '/',
+    lazy: async () => ({ Component: (await import('@/views/home')).default }),
+  },
+  {
     path: '/login',
     lazy: async () => ({ Component: (await import('@/views/login')).default }),
   },
   {
     element: <ProtectedRoute />,
     children: [
-      {
-        path: '/',
-        element: <Navigate to="/architectures/value-streams" replace />,
-      },
       {
         path: '/architectures',
         lazy: async () => ({ Component: (await import('@/views/architectures/layout')).default }),
