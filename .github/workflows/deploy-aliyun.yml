@@ -8,7 +8,7 @@ name: Build and Push (ACR + OSS)
 #   SSH ECS → bash /opt/eap/eap-autodeploy.sh → podman pull ACR → restart → health check
 #
 # 部署触发: 云效 Flow 为唯一部署触发源 (已移除 ECS systemd timer 轮询)
-# Flow 触发使用云效个人访问令牌 (YUNXIAO_ACCESS_TOKEN)
+# Flow 触发使用 Webhook URL (FLOW_WEBHOOK_URL secret)
 #
 # 访问:
 #   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
@@ -49,23 +49,36 @@ jobs:
       - name: Trigger Aliyun Flow pipeline
         run: |
           curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
-            "http://flow-openapi.aliyun.com/pipeline/webhook/aUrhAsquLLleA9SyBA0t"
+            "${{ secrets.FLOW_WEBHOOK_URL }}"
 
-      - name: Clean old ACR tags (keep latest 3)
+      - name: Clean old ACR tags (keep latest 10)
         run: |
-          # 列出所有 tag（除 latest），按时间排序，删除旧的
-          TAGS=$(docker image ls --format "{{.Tag}}" "${{ env.ACR_REGISTRY }}/${{ env.ACR_NAMESPACE }}/backend" | grep -v latest | sort)
-          COUNT=$(echo "$TAGS" | grep -c . || true)
+          # ACR 个人版 registry v2 API: 列出所有 tag，获取 digest，按时间排序，删旧的
+          REGISTRY="${{ env.ACR_REGISTRY }}"
+          REPO="${{ env.ACR_NAMESPACE }}/backend"
+          AUTH="${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}"
+
+          # 获取所有 tag
+          TAGS=$(curl -s -u "$AUTH" "https://$REGISTRY/v2/$REPO/tags/list" | jq -r '.tags[]' | grep -v latest | sort)
+
+          # 获取每个 tag 的 digest 和创建时间，按时间倒序
+          TAG_INFO=""
+          for TAG in $TAGS; do
+            DIGEST=$(curl -s -I -u "$AUTH" -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              "https://$REGISTRY/v2/$REPO/manifests/$TAG" | grep -i "Docker-Content-Digest" | awk '{print $2}' | tr -d '\r')
+            if [ -n "$DIGEST" ]; then
+              TAG_INFO="$TAG_INFO$TAG $DIGEST\n"
+            fi
+          done
+
+          # 保留最新 10 个，删其余
+          COUNT=$(echo -e "$TAG_INFO" | grep -c . || true)
           echo "Current tags (excl latest): $COUNT"
-          if [ "$COUNT" -gt 3 ]; then
-            OLD=$(echo "$TAGS" | head -n $((COUNT - 3)))
-            for TAG in $OLD; do
-              echo "Deleting old tag: $TAG"
-              # ACR 个人版 REST API 删除 tag
-              curl -s -X DELETE \
-                "https://${{ env.ACR_REGISTRY }}/v2/${{ env.ACR_NAMESPACE }}/backend/manifests/$TAG" \
-                -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-                -u "${{ secrets.ACR_USERNAME }}:${{ secrets.ACR_PASSWORD }}" || true
+          if [ "$COUNT" -gt 10 ]; then
+            OLD=$(echo -e "$TAG_INFO" | head -n $((COUNT - 10)))
+            echo "$OLD" | while read TAG DIGEST; do
+              echo "Deleting old ACR tag: $TAG (digest: $DIGEST)"
+              curl -s -X DELETE -u "$AUTH" "https://$REGISTRY/v2/$REPO/manifests/$DIGEST" || true
             done
           fi
 
