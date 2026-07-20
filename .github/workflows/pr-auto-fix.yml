@@ -39,7 +39,9 @@ jobs:
 
           REVIEW_BODY=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --jq '[.[] | select(.user.login == "github-actions[bot]" and .state == "CHANGES_REQUESTED")] | sort_by(.submitted_at) | last | .body')
-          echo "review_body=$REVIEW_BODY" >> $GITHUB_OUTPUT
+          echo "review_body<<REVIEW_EOF" >> $GITHUB_OUTPUT
+          echo "$REVIEW_BODY" >> $GITHUB_OUTPUT
+          echo "REVIEW_EOF" >> $GITHUB_OUTPUT
 
           REVIEW_COUNT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
             --paginate \
