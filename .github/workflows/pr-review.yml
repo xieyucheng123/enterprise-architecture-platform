@@ -8,7 +8,6 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
-  checks: write
 
 jobs:
   review-ai:
@@ -32,9 +31,16 @@ jobs:
           GH_TOKEN: ${{ secrets.PAT_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          sleep 5
-          VERDICT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
-            --jq '[.[] | select(.user.login | test("github-actions|bot"))] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
+          VERDICT="UNKNOWN"
+          for i in 1 2 3 4 5 6; do
+            sleep 5
+            VERDICT=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews \
+              --jq '[.[] | select(.user.login == "github-actions[bot]")] | sort_by(.submitted_at) | last | .state' 2>/dev/null || echo "UNKNOWN")
+            if [ "$VERDICT" != "null" ] && [ "$VERDICT" != "UNKNOWN" ]; then
+              break
+            fi
+            echo "Retry $i: verdict not ready yet ($VERDICT)"
+          done
 
           echo "Latest AI review verdict: $VERDICT"
 
@@ -61,7 +67,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --jq '.[].filename' 2>/dev/null)
+          CHANGED_FILES=$(gh api repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files --jq '.[].filename')
+          if [ $? -ne 0 ]; then
+            echo "::error::Failed to fetch PR files, failing closed for safety"
+            exit 1
+          fi
 
           DB_FILES=$(echo "$CHANGED_FILES" | grep -iE '(migration|\.sql$|schema|database|\.prisma$|alembic|diesel)' || true)
 
