@@ -48,6 +48,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // health + ai handlers (State = AppState)
     let main_router = OpenApiRouter::new()
         .routes(utoipa_axum::routes!(health_handler))
+        .routes(utoipa_axum::routes!(version_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
         .with_state(state.clone());
@@ -139,4 +140,35 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
         "db": db_status,
         "llm": llm_status,
     }))
+}
+
+/// 应用版本信息
+#[utoipa::path(
+    get,
+    path = "/api/version",
+    tag = "health",
+    responses(
+        (status = 200, description = "应用版本信息", body = inline(serde_json::Value)),
+    )
+)]
+async fn version_handler() -> Json<serde_json::Value> {
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "name": "enterprise-architecture-platform",
+        "rust_version": env!("CARGO_PKG_RUST_VERSION"),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn version_handler_reports_cargo_metadata() {
+        let Json(value) = version_handler().await;
+
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["name"], "enterprise-architecture-platform");
+        assert_eq!(value["rust_version"], env!("CARGO_PKG_RUST_VERSION"));
+    }
 }
