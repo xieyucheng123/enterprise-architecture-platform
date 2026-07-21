@@ -434,7 +434,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let db = ctx.data::<DatabaseConnection>()?;
 
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
-                let description = ctx.args.try_get("description")?.string()?.to_owned();
+                let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
                 let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
 
@@ -451,7 +451,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
         },
     )
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
-    .argument(InputValue::new("description", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("businessVersion", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("importance", TypeRef::named_nn(TypeRef::STRING)));
 
