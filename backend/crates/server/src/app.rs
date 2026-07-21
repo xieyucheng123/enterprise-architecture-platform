@@ -48,6 +48,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // health + ai handlers (State = AppState)
     let main_router = OpenApiRouter::new()
         .routes(utoipa_axum::routes!(health_handler))
+        .routes(utoipa_axum::routes!(version_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
         .with_state(state.clone());
@@ -138,5 +139,22 @@ async fn health_handler(State(state): State<AppState>) -> Json<serde_json::Value
         "status": overall,
         "db": db_status,
         "llm": llm_status,
+    }))
+}
+
+/// 应用版本信息
+#[utoipa::path(
+    get,
+    path = "/api/version",
+    tag = "health",
+    responses(
+        (status = 200, description = "应用版本信息", body = inline(serde_json::Value)),
+    )
+)]
+async fn version_handler() -> Json<serde_json::Value> {
+    Json(json!({
+        "version": "1.0.0",
+        "name": "enterprise-architecture-platform",
+        "rust_version": "1.75.0",
     }))
 }
