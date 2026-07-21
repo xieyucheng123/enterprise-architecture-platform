@@ -16,7 +16,7 @@ pub struct ValueStream {
     pub business_version: String,
     pub status: LifecycleStatus,
     pub name: String,
-    pub description: String,
+    pub description: Option<String>,
     pub triggering_event: Option<String>,
     pub end_deliverable: Option<String>,
     pub owner_id: Option<Uuid>,
@@ -36,7 +36,7 @@ impl ValueStream {
     pub fn create(
         id: Uuid,
         name: String,
-        description: String,
+        description: Option<String>,
         business_version: String,
         importance: ValueStreamImportance,
         now: DateTime<Utc>,
@@ -85,7 +85,7 @@ impl ValueStream {
         new_id: Uuid,
         new_version: String,
         new_name: String,
-        new_description: String,
+        new_description: Option<String>,
         now: DateTime<Utc>,
     ) -> Result<ValueStream, DomainError> {
         // Must be active to create a new version
@@ -128,7 +128,7 @@ impl ValueStream {
     pub fn update(
         &mut self,
         name: Option<String>,
-        description: Option<String>,
+        description: Option<Option<String>>,
         importance: Option<ValueStreamImportance>,
         now: DateTime<Utc>,
     ) -> Result<(), DomainError> {

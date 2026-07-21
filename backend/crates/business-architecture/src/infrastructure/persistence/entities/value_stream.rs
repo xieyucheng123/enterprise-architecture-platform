@@ -14,7 +14,7 @@ pub struct Model {
     pub business_version: String,
     pub status: LifecycleStatus,
     pub name: String,
-    pub description: String,
+    pub description: Option<String>,
     pub triggering_event: Option<String>,
     pub end_deliverable: Option<String>,
     pub owner_id: Option<Uuid>,

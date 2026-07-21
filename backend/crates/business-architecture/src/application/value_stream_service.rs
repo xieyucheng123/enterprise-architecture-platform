@@ -21,7 +21,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
     pub async fn create(
         &self,
         name: String,
-        description: String,
+        description: Option<String>,
         business_version: String,
         importance: shared_common::enums::ValueStreamImportance,
     ) -> Result<ValueStream, DomainError> {
@@ -57,7 +57,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         let now = Utc::now();
         let new_id = Uuid::now_v7();
         let name = new_name.unwrap_or_else(|| current.name.clone());
-        let description = new_description.unwrap_or_else(|| current.description.clone());
+        let description = new_description.or_else(|| current.description.clone());
 
         // Domain rule: archive current, create new version with same logical_id
         let new_vs = current.create_new_version(new_id, new_version, name, description, now)?;
@@ -72,7 +72,7 @@ impl<R: ValueStreamRepository> ValueStreamService<R> {
         &self,
         id: Uuid,
         name: Option<String>,
-        description: Option<String>,
+        description: Option<Option<String>>,
         importance: Option<shared_common::enums::ValueStreamImportance>,
     ) -> Result<ValueStream, DomainError> {
         let mut vs = self.repo.find_by_id(id).await?.ok_or(DomainError::ValueStreamNotFound)?;
