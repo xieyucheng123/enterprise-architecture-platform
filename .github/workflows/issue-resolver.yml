@@ -5,6 +5,8 @@ on:
     types: [labeled]
   issue_comment:
     types: [created]
+  discussion:
+    types: [created]
   discussion_comment:
     types: [created]
 
@@ -43,8 +45,10 @@ jobs:
 
   discuss:
     if: |
-      github.event_name == 'discussion_comment' && contains(github.event.comment.body, '@oh') &&
-      (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER')
+      (github.event_name == 'discussion_comment' && contains(github.event.comment.body, '@oh') &&
+        (github.event.comment.author_association == 'OWNER' || github.event.comment.author_association == 'COLLABORATOR' || github.event.comment.author_association == 'MEMBER')) ||
+      (github.event_name == 'discussion' && contains(github.event.discussion.body, '@oh') &&
+        (github.event.discussion.author_association == 'OWNER' || github.event.discussion.author_association == 'COLLABORATOR' || github.event.discussion.author_association == 'MEMBER'))
     runs-on: ubuntu-latest
     steps:
       - name: Install Obscura
@@ -93,7 +97,6 @@ jobs:
           SEARCH_API_KEY: ${{ secrets.TAVILY_API_KEY }}
           AGENT_ENABLE_BROWSING: "true"
           DISCUSSION_NODE_ID: ${{ github.event.discussion.node_id }}
-          DISCUCTION_COMMENT_ID: ${{ github.event.comment.node_id }}
           REPO_NAME: ${{ github.repository }}
         run: |
           uv run --no-project --with openhands-sdk --with openhands-tools \
