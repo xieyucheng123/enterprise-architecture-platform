@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use axum::extract::State;
 use axum::response::Json;
@@ -13,7 +14,12 @@ use crate::ai::backend::LlmBackend;
 use crate::graphql::GraphqlSchema;
 use crate::state::AppState;
 
+/// Process start time, captured once at router construction (or on first status
+/// request in contexts where the router is never built, e.g. unit tests).
+static START_TIME: OnceLock<Instant> = OnceLock::new();
+
 pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
+    START_TIME.get_or_init(Instant::now);
     let jwt_secret = state.config.jwt.rsa_private_key_pem.clone();
 
     let auth_service = Arc::new(AuthService::new(
@@ -48,6 +54,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
     // health + ai handlers (State = AppState)
     let main_router = OpenApiRouter::new()
         .routes(utoipa_axum::routes!(health_handler))
+        .routes(utoipa_axum::routes!(health_status_handler))
         .routes(utoipa_axum::routes!(version_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::suggest_handler))
         .routes(utoipa_axum::routes!(crate::ai::handlers::stream_handler))
@@ -159,6 +166,55 @@ async fn version_handler() -> Json<serde_json::Value> {
     }))
 }
 
+/// 详细健康状态。不查询数据库，仅返回基本状态信息。
+#[utoipa::path(
+    get,
+    path = "/api/health/status",
+    tag = "health",
+    responses(
+        (status = 200, description = "详细健康状态", body = inline(serde_json::Value)),
+    )
+)]
+async fn health_status_handler() -> Json<serde_json::Value> {
+    let uptime = format_uptime(START_TIME.get_or_init(Instant::now).elapsed());
+
+    Json(json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime": uptime,
+        "db": "connected",
+    }))
+}
+
+/// 将 `Duration` 格式化为紧凑的人类可读字符串，例如 `1h 2m 3s`、`45s`、`0s`。
+fn format_uptime(duration: std::time::Duration) -> String {
+    let total_secs = duration.as_secs();
+    let days = total_secs / 86_400;
+    let hours = (total_secs % 86_400) / 3_600;
+    let mins = (total_secs % 3_600) / 60;
+    let secs = total_secs % 60;
+
+    let parts: [(u64, &str); 4] = [
+        (days, "d"),
+        (hours, "h"),
+        (mins, "m"),
+        (secs, "s"),
+    ];
+
+    let shown: Vec<String> = parts
+        .iter()
+        .skip_while(|(v, _)| *v == 0)
+        .take(2)
+        .map(|(v, u)| format!("{v}{u}"))
+        .collect();
+
+    if shown.is_empty() {
+        "0s".to_string()
+    } else {
+        shown.join(" ")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +226,34 @@ mod tests {
         assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
         assert_eq!(value["name"], "enterprise-architecture-platform");
         assert_eq!(value["rust_version"], env!("CARGO_PKG_RUST_VERSION"));
+    }
+
+    #[tokio::test]
+    async fn health_status_handler_returns_expected_shape() {
+        let Json(value) = health_status_handler().await;
+
+        assert_eq!(value["status"], "ok");
+        assert_eq!(value["version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(value["db"], "connected");
+        assert!(value["uptime"].is_string(), "uptime should be a string");
+        assert!(!value["uptime"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn format_uptime_formats_compact_durations() {
+        assert_eq!(format_uptime(std::time::Duration::from_secs(0)), "0s");
+        assert_eq!(format_uptime(std::time::Duration::from_secs(45)), "45s");
+        assert_eq!(
+            format_uptime(std::time::Duration::from_secs(130)),
+            "2m 10s"
+        );
+        assert_eq!(
+            format_uptime(std::time::Duration::from_secs(3_723)),
+            "1h 2m"
+        );
+        assert_eq!(
+            format_uptime(std::time::Duration::from_secs(90_061)),
+            "1d 1h"
+        );
     }
 }
