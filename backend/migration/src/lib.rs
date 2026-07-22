@@ -15,6 +15,7 @@ mod m20250101_000012_create_organizations;
 mod m20250101_000013_add_created_at_index_to_capabilities;
 mod m20250101_000014_add_status_to_capabilities;
 mod m20250101_000015_add_description_to_organizations;
+mod m20250101_000016_add_pipeline_test_1784711733_to_organizations;
 
 pub struct Migrator;
 
@@ -37,6 +38,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20250101_000013_add_created_at_index_to_capabilities::Migration),
             Box::new(m20250101_000014_add_status_to_capabilities::Migration),
             Box::new(m20250101_000015_add_description_to_organizations::Migration),
+            Box::new(m20250101_000016_add_pipeline_test_1784711733_to_organizations::Migration),
         ]
     }
 }
