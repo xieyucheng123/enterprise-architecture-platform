@@ -31,7 +31,7 @@ jobs:
           chmod +x /usr/local/bin/obscura
           obscura --version || true
 
-      - uses: xieyucheng123/issue-resolver@main
+      - uses: link-seek/issue-resolver@main
         with:
           llm-model: ${{ secrets.LLM_MODEL || 'openai/glm-5.2' }}
           llm-base-url: ${{ secrets.LLM_BASE_URL || 'https://api.modelarts-maas.com/v2' }}
@@ -71,7 +71,7 @@ jobs:
       - name: Checkout issue-resolver scripts
         uses: actions/checkout@v4
         with:
-          repository: xieyucheng123/issue-resolver
+          repository: link-seek/issue-resolver
           ref: main
           path: issue-resolver-scripts
           token: ${{ secrets.PAT_TOKEN }}
