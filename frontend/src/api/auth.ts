@@ -15,12 +15,6 @@ interface LoginResponse {
   }
 }
 
-interface RegisterResponse {
-  access_token: string
-  refresh_token: string
-  user: LoginResponse['user']
-}
-
 export async function login(email: string, password: string): Promise<LoginResponse> {
   const res = await fetch(`${API_BASE}/auth/login`, {
     method: 'POST',
@@ -30,21 +24,6 @@ export async function login(email: string, password: string): Promise<LoginRespo
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: 'Login failed' }))
     throw new Error(err.message || 'Login failed')
-  }
-  const data = await res.json()
-  useAuthStore.getState().login(data.access_token, data.refresh_token, data.user)
-  return data
-}
-
-export async function register(email: string, name: string, password: string): Promise<RegisterResponse> {
-  const res = await fetch(`${API_BASE}/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, name, password }),
-  })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: 'Registration failed' }))
-    throw new Error(err.message || 'Registration failed')
   }
   const data = await res.json()
   useAuthStore.getState().login(data.access_token, data.refresh_token, data.user)

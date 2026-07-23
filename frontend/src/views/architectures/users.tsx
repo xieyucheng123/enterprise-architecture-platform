@@ -19,6 +19,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Loader2, UserPlus } from 'lucide-react'
@@ -54,6 +55,7 @@ export default function UsersPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [roleUpdating, setRoleUpdating] = useState<string | null>(null)
+  const [confirmRole, setConfirmRole] = useState<{ user: User; newRole: string } | null>(null)
 
   const users: User[] = data?.users?.nodes || []
 
@@ -83,6 +85,16 @@ export default function UsersPage() {
       setRoleUpdating(null)
     }
   }
+
+  function onRoleSelect(user: User, newRole: string) {
+    if (newRole === user.role) return
+    setConfirmRole({ user, newRole })
+  }
+
+  const isDangerousRoleChange =
+    confirmRole !== null &&
+    confirmRole.user.role === 'admin' &&
+    confirmRole.newRole !== 'admin'
 
   return (
     <div className="p-6 space-y-4">
@@ -115,7 +127,7 @@ export default function UsersPage() {
                   <select
                     value={u.role}
                     disabled={roleUpdating === u.id}
-                    onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                    onChange={(e) => onRoleSelect(u, e.target.value)}
                     className="border rounded px-2 py-1 text-sm bg-background"
                   >
                     {ROLE_OPTIONS.map((r) => (
@@ -201,6 +213,41 @@ export default function UsersPage() {
               disabled={submitting || !form.email || !form.name || !form.password}
             >
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : '创建'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={confirmRole !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmRole(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认修改角色</DialogTitle>
+            <DialogDescription>
+              {isDangerousRoleChange
+                ? `即将把 ${confirmRole?.user.name} 的角色从 admin 降级为 ${confirmRole?.newRole}，该用户将失去管理员权限。`
+                : `即将把 ${confirmRole?.user.name} 的角色修改为 ${confirmRole?.newRole}。`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmRole(null)}>
+              取消
+            </Button>
+            <Button
+              variant={isDangerousRoleChange ? 'destructive' : 'default'}
+              disabled={roleUpdating !== null}
+              onClick={() => {
+                if (!confirmRole) return
+                const { user, newRole } = confirmRole
+                setConfirmRole(null)
+                handleRoleChange(user.id, newRole)
+              }}
+            >
+              {roleUpdating ? <Loader2 className="h-4 w-4 animate-spin" /> : '确认'}
             </Button>
           </DialogFooter>
         </DialogContent>

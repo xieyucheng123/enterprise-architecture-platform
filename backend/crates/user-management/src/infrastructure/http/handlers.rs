@@ -664,6 +664,23 @@ pub async fn update_role(
         .await?
         .ok_or_else(|| ApiError(shared_common::AppError::NotFound("user not found".into())))?;
 
+    // Guard against lockout: refuse to demote an admin to a non-admin role when
+    // it would remove the last admin, and refuse self-demotion outright so an
+    // admin cannot accidentally strip their own access.
+    if user.role.is_admin() && !new_role.is_admin() {
+        if input.user_id == claims.user_id {
+            return Err(ApiError(shared_common::AppError::Forbidden(
+                "cannot demote your own admin role".into(),
+            )));
+        }
+        let admin_count = repo.count_by_role(UserRole::Admin).await?;
+        if admin_count <= 1 {
+            return Err(ApiError(shared_common::AppError::Forbidden(
+                "cannot demote the last remaining admin".into(),
+            )));
+        }
+    }
+
     user.set_role(new_role);
     let saved = repo.save(&user).await?;
 
