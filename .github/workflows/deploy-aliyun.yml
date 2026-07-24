@@ -2,13 +2,13 @@ name: Build and Push (ACR + OSS)
 
 # 两段式流水线:
 # 阶段1 GitHub Actions:
-#   后端 build → push ACR → 触发阿里云云效 Flow (SSH ECS pull+restart)
+#   后端 build → push ACR (云效自动监听 ACR 镜像推送事件触发部署)
 #   前端 build → upload OSS → object 设公共读 (CDN www→OSS 静态网站托管)
 # 阶段2 阿里云云效 Flow (pipelineId=5143756):
-#   SSH ECS → bash /opt/eap/eap-autodeploy.sh → podman pull ACR → restart → health check
+#   ACR 镜像推送事件触发 → SSH ECS → podman play kube deploy/pod.yml → health check
 #
-# 部署触发: 云效 Flow 为唯一部署触发源 (已移除 ECS systemd timer 轮询)
-# Flow 触发使用 Webhook URL (FLOW_WEBHOOK_URL secret)
+# 部署触发: 云效 Flow 监听 ACR 镜像推送事件自动触发 (无需 webhook)
+# 密钥: 全部存储在云效加密变量组，ECS 上无残留
 #
 # 访问:
 #   www.xieyucheng.top → CDN → OSS (object 公共读 + 静态网站托管) → 前端
@@ -26,7 +26,7 @@ env:
   OSS_BUCKET: eap-frontend-xyc
 
 jobs:
-  # ==================== 后端: Build → Push ACR → 触发云效 Flow ====================
+  # ==================== 后端: Build → Push ACR (云效自动监听触发) ====================
   build-backend:
     runs-on: ubuntu-latest
     steps:
@@ -47,11 +47,6 @@ jobs:
           docker push "${IMAGE}:latest"
           docker push "${IMAGE}:${TAG}"
           echo "PUSHED_TAG=$TAG" >> $GITHUB_ENV
-
-      - name: Trigger Aliyun Flow pipeline
-        run: |
-          curl -s --fail -H "Content-Type: application/json" -X POST -d '{}' \
-            "${{ secrets.FLOW_WEBHOOK_URL }}"
 
       - name: Clean old ACR tags (keep latest 10)
         run: |
