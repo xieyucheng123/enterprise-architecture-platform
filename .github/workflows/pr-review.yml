@@ -63,6 +63,7 @@ jobs:
   review-ai:
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     concurrency:
       group: review-ai-${{ github.event.pull_request.number }}
       cancel-in-progress: true
