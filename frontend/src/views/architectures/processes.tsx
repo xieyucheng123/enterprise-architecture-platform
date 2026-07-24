@@ -22,20 +22,20 @@ const GET_PROCESSES = gql`
 `
 
 const CREATE_PROCESS = gql`
-  mutation CreateProcess($data: BusinessProcessesInsertInput!) {
-    businessProcessesCreateOne(data: $data) { id name }
+  mutation CreateProcess($spaceId: String!, $name: String!, $description: String, $sla: String, $cycleTime: Int, $costPerTransaction: Float) {
+    processCreate(spaceId: $spaceId, name: $name, description: $description, sla: $sla, cycleTime: $cycleTime, costPerTransaction: $costPerTransaction) { id name }
   }
 `
 
 const UPDATE_PROCESS = gql`
-  mutation UpdateProcess($data: BusinessProcessesUpdateInput!, $filter: BusinessProcessesFilterInput!) {
-    businessProcessesUpdate(data: $data, filter: $filter) { id name }
+  mutation UpdateProcess($id: String!, $name: String, $description: String, $sla: String, $cycleTime: Int, $costPerTransaction: Float) {
+    processUpdate(id: $id, name: $name, description: $description, sla: $sla, cycleTime: $cycleTime, costPerTransaction: $costPerTransaction) { id name }
   }
 `
 
 const DELETE_PROCESS = gql`
-  mutation DeleteProcess($filter: BusinessProcessesFilterInput!) {
-    businessProcessesDelete(filter: $filter)
+  mutation DeleteProcess($id: String!) {
+    processDelete(id: $id)
   }
 `
 
@@ -43,9 +43,6 @@ interface Process {
   id: string; name: string; description: string
   sla: string | null; cycleTime: number | null; costPerTransaction: number | null; status: string
 }
-
-function nowRFC3339() { return new Date().toISOString() }
-function newUUID() { return crypto.randomUUID() }
 
 export default function Processes() {
   const { spaceId } = useParams<{ spaceId: string }>()
@@ -152,15 +149,12 @@ function ProcessCrudDialog({ open, onOpenChange, editing, spaceId }: {
       const cp = cost ? parseFloat(cost) : null
       if (editing) {
         await updateMut({
-          variables: { data: { name, description, sla, cycleTime: ct, costPerTransaction: cp }, filter: { id: { eq: editing.id } } },
+          variables: { id: editing.id, name, description, sla, cycleTime: ct, costPerTransaction: cp },
           refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],
         })
       } else {
-        const now = nowRFC3339()
         await createMut({
-          variables: {
-            data: { id: newUUID(), logicalId: newUUID(), spaceId, name, description, sla, cycleTime: ct, costPerTransaction: cp, status: 'active', businessVersion: 'v1.0', createdAt: now, updatedAt: now }
-          },
+          variables: { spaceId, name, description, sla, cycleTime: ct, costPerTransaction: cp },
           refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }],
         })
       }
@@ -198,7 +192,7 @@ function ProcessDeleteDialog({ item, onConfirm, spaceId }: { item: Process | nul
   const [loading, setLoading] = useState(false)
   async function handleDelete() {
     if (!item) return; setLoading(true)
-    try { await deleteMut({ variables: { filter: { id: { eq: item.id } } }, refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }] }); onConfirm() }
+    try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_PROCESSES, variables: { spaceId } }] }); onConfirm() }
     catch (err) { console.error(err) } finally { setLoading(false) }
   }
   return (

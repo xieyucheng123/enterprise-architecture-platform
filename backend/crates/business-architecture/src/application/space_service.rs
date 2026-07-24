@@ -152,7 +152,7 @@ impl<S: SpaceRepository, M: MembershipRepository> SpaceService<S, M> {
         let m = self.members.find_membership(space_id, actor_id).await?
             .ok_or(DomainError::NotSpaceMember)?;
         if !m.role.is_editor() {
-            return Err(DomainError::NotSpaceMember);
+            return Err(DomainError::NotSpaceEditor);
         }
         Ok(())
     }

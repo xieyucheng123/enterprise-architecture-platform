@@ -11,20 +11,18 @@ import { Trash2, Loader2 } from 'lucide-react'
 import { GET_SPACE_MEMBERS, ADD_SPACE_MEMBER, REMOVE_SPACE_MEMBER } from '@/api/spaces'
 import type { SpaceMember } from '@/api/spaces'
 
-const GET_USERS = gql`
-  query GetUsersByEmail($email: String!) {
-    users(filters: { email: { eq: $email } }) {
-      nodes {
-        id
-        name
-        email
-      }
+const SPACE_USER_BY_EMAIL = gql`
+  query SpaceUserByEmail($spaceId: String!, $email: String!) {
+    spaceUserByEmail(spaceId: $spaceId, email: $email) {
+      id
+      name
+      email
     }
   }
 `
 
 interface UserResult {
-  users: { nodes: { id: string; name: string; email: string }[] }
+  spaceUserByEmail: { id: string; name: string; email: string } | null
 }
 
 export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
@@ -56,7 +54,7 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
   })
 
   // Look up user by email, then add as member.
-  const [lookupUser] = useLazyLookupUser()
+  const [lookupUser] = useLazyLookupUser(spaceId)
 
   async function handleAdd() {
     setError(null)
@@ -148,12 +146,15 @@ export function SpaceMembersDialog({ spaceId, open, onOpenChange }: {
   )
 }
 
-// Local hook to look up a user by email via GraphQL.
-function useLazyLookupUser() {
-  const [lookup] = useLazyQuery<UserResult>(GET_USERS)
+// Local hook to look up a user by email via the space-scoped GraphQL query.
+// This uses `spaceUserByEmail` (authorized by space membership) instead of the
+// `users` entity (which requires global admin), so non-admin space owners can
+// add members.
+function useLazyLookupUser(spaceId: string) {
+  const [lookup] = useLazyQuery<UserResult>(SPACE_USER_BY_EMAIL)
   async function lookupUser(email: string) {
-    const res = await lookup({ variables: { email } })
-    return res.data?.users?.nodes?.[0] ?? null
+    const res = await lookup({ variables: { spaceId, email } })
+    return res.data?.spaceUserByEmail ?? null
   }
   return [lookupUser] as const
 }

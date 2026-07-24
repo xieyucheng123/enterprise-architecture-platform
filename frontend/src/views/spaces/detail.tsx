@@ -119,7 +119,7 @@ export default function SpaceDetail() {
 
         <div className="mt-8 grid gap-6 md:grid-cols-3">
           {statsItems.map((item) => (
-            <Link key={item.to} to={`/spaces/${space.id}/${item.to}`}>
+            <Link key={item.to} to={`/spaces/${space.id}/architectures/${item.to}`}>
               <Card className="h-full hover:shadow-md transition-shadow">
                 <CardHeader>
                   <CardTitle>{item.label}</CardTitle>

@@ -18,6 +18,8 @@ pub enum DomainError {
     SpaceNotFound,
     #[error("not a member of this space")]
     NotSpaceMember,
+    #[error("only space editors can modify content")]
+    NotSpaceEditor,
     #[error("only space owners can manage members")]
     NotSpaceOwner,
     #[error("space name cannot be empty")]

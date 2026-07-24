@@ -22,20 +22,20 @@ const GET_CAPABILITIES = gql`
 `
 
 const CREATE_CAPABILITY = gql`
-  mutation CreateCapability($data: BusinessCapabilitiesInsertInput!) {
-    businessCapabilitiesCreateOne(data: $data) { id name }
+  mutation CreateCapability($spaceId: String!, $name: String!, $description: String!, $level: CapabilityLevel!, $maturity: MaturityLevel!, $businessValue: BusinessValueRating!) {
+    capabilityCreate(spaceId: $spaceId, name: $name, description: $description, level: $level, maturity: $maturity, businessValue: $businessValue) { id name }
   }
 `
 
 const UPDATE_CAPABILITY = gql`
-  mutation UpdateCapability($data: BusinessCapabilitiesUpdateInput!, $filter: BusinessCapabilitiesFilterInput!) {
-    businessCapabilitiesUpdate(data: $data, filter: $filter) { id name }
+  mutation UpdateCapability($id: String!, $name: String, $description: String, $level: CapabilityLevel, $maturity: MaturityLevel, $businessValue: BusinessValueRating) {
+    capabilityUpdate(id: $id, name: $name, description: $description, level: $level, maturity: $maturity, businessValue: $businessValue) { id name }
   }
 `
 
 const DELETE_CAPABILITY = gql`
-  mutation DeleteCapability($filter: BusinessCapabilitiesFilterInput!) {
-    businessCapabilitiesDelete(filter: $filter)
+  mutation DeleteCapability($id: String!) {
+    capabilityDelete(id: $id)
   }
 `
 
@@ -43,9 +43,6 @@ interface Capability {
   id: string; name: string; description: string
   level: string; maturity: string; businessValue: string; status: string
 }
-
-function nowRFC3339() { return new Date().toISOString() }
-function newUUID() { return crypto.randomUUID() }
 
 export default function Capabilities() {
   const { spaceId } = useParams<{ spaceId: string }>()
@@ -148,15 +145,12 @@ function CapabilityCrudDialog({ open, onOpenChange, editing, spaceId }: {
     try {
       if (editing) {
         await updateMut({
-          variables: { data: { name, description, level, maturity, businessValue }, filter: { id: { eq: editing.id } } },
+          variables: { id: editing.id, name, description, level, maturity, businessValue },
           refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
         })
       } else {
-        const now = nowRFC3339()
         await createMut({
-          variables: {
-            data: { id: newUUID(), spaceId, name, description, level, maturity, businessValue, status: 'active', businessVersion: 'v1.0', cost: 'low', createdAt: now, updatedAt: now }
-          },
+          variables: { spaceId, name, description, level, maturity, businessValue },
           refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }],
         })
       }
@@ -209,7 +203,7 @@ function CapabilityDeleteDialog({ item, onConfirm, spaceId }: { item: Capability
   const [loading, setLoading] = useState(false)
   async function handleDelete() {
     if (!item) return; setLoading(true)
-    try { await deleteMut({ variables: { filter: { id: { eq: item.id } } }, refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }] }); onConfirm() }
+    try { await deleteMut({ variables: { id: item.id }, refetchQueries: [{ query: GET_CAPABILITIES, variables: { spaceId } }] }); onConfirm() }
     catch (err) { console.error(err) } finally { setLoading(false) }
   }
   return (
