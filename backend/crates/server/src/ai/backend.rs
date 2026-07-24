@@ -1,6 +1,9 @@
 use crate::config::LlmConfig;
 use crate::ai::dto::{AiScenario, AiSuggestion};
 
+/// LLM backend variants. Fields beyond `api_key` are reserved for future
+/// real LLM integration (currently only `suggest` stubs responses).
+#[allow(dead_code)]
 pub enum LlmBackend {
     OpenAi { api_key: String, model: String },
     AzureOpenAi { endpoint: String, api_key: String, deployment: String },
@@ -26,15 +29,6 @@ impl LlmBackend {
                 model: cfg.model.clone().unwrap_or_else(|| "llama3".to_string()),
             },
             _ => LlmBackend::Mock,
-        }
-    }
-
-    pub async fn chat(&self, _prompt: &str) -> anyhow::Result<String> {
-        match self {
-            LlmBackend::Mock => Ok("Mock LLM response".to_string()),
-            LlmBackend::OpenAi { .. } => Ok("OpenAI response (not yet implemented)".to_string()),
-            LlmBackend::AzureOpenAi { .. } => Ok("Azure OpenAI response (not yet implemented)".to_string()),
-            LlmBackend::Ollama { .. } => Ok("Ollama response (not yet implemented)".to_string()),
         }
     }
 

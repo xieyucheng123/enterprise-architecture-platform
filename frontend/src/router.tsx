@@ -1,21 +1,5 @@
-import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom'
-import { useAuthStore } from '@/stores/auth'
-
-function ProtectedRoute() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
-  if (!isAuthenticated) return <Navigate to="/login" replace />
-  return <Outlet />
-}
-
-function AdminRoute() {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated)
-  const user = useAuthStore((s) => s.user)
-  // While authenticated but user data hasn't loaded yet (e.g. after refresh),
-  // block access instead of letting a non-admin sneak through.
-  if (isAuthenticated && !user) return null
-  if (user && user.role !== 'admin') return <Navigate to="/architectures/value-streams" replace />
-  return <Outlet />
-}
+import { createBrowserRouter, Navigate } from 'react-router-dom'
+import { ProtectedRoute, AdminRoute } from '@/route-guards'
 
 export const router = createBrowserRouter([
   {

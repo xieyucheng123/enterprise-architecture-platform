@@ -94,7 +94,7 @@ impl Configuration {
             }
         }
 
-        if self.llm.api_key.as_ref().is_none_or(|k| k.is_empty()) {
+        if self.llm.api_key.as_ref().map_or(true, |k| k.is_empty()) {
             tracing::warn!(
                 "LLM api_key is empty — AI features will be degraded. \
                  Set APP_LLM__API_KEY to enable."

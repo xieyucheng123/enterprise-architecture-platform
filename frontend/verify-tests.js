@@ -75,7 +75,6 @@ function main() {
   let totalChecks = 0;
   
   for (const testFile of testFiles) {
-    const relativePath = path.relative(__dirname, testFile);
     const { passed, total } = checkTestFile(testFile);
     totalPassed += passed;
     totalChecks += total;

@@ -13,9 +13,11 @@ function useAuthInit() {
 
   useEffect(() => {
     if (token && !user) {
-      fetchMe().then((me) => {
-        if (!me) logout()
-      })
+      fetchMe()
+        .then((me) => {
+          if (!me) logout()
+        })
+        .catch(() => logout())
     }
   }, [token, user, logout])
 }

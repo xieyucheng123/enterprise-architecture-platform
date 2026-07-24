@@ -1,5 +1,4 @@
 import { useQuery } from '@apollo/client/react'
-import { gql } from '@apollo/client'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
