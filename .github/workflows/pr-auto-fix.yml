@@ -132,8 +132,12 @@ jobs:
           REPO_NAME: ${{ github.repository }}
           REVIEW_BODY: ${{ steps.pr-info.outputs.review_body }}
           ITERATION: ${{ steps.iter-check.outputs.auto_fix_count }}
+          # For token auto-refresh
+          APP_ID: ${{ secrets.APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
         run: |
-          uv run --no-project --with openhands-sdk --with openhands-tools \
+          uv run --no-project --with openhands-sdk --with openhands-tools --with cryptography --with pyyaml \
             python ../issue-resolver-scripts/scripts/auto_fix_pr.py
 
       - name: Approve pending CI workflows
