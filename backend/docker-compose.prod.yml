@@ -9,4 +9,5 @@ services:
     volumes:
       - ./data:/app/data
     environment:
+      - APP_ENV=production
       - APP_LLM__BACKEND=llm

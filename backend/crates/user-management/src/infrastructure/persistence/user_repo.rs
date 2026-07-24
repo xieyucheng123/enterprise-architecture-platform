@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set};
+use shared_common::enums::UserRole;
 use uuid::Uuid;
 
 use crate::domain::error::DomainError;
@@ -107,5 +108,14 @@ impl UserRepository for SeaOrmUserRepo {
 
         let users = models.into_iter().map(Into::into).collect();
         Ok((users, total))
+    }
+
+    async fn count_by_role(&self, role: UserRole) -> Result<u64, DomainError> {
+        let count = user::Entity::find()
+            .filter(user::Column::Role.eq(role))
+            .filter(user::Column::DeletedAt.is_null())
+            .count(&self.db)
+            .await?;
+        Ok(count)
     }
 }

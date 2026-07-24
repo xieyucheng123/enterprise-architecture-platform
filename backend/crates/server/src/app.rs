@@ -37,6 +37,7 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
                 redirect_uris: c.redirect_uris.clone(),
             })
             .collect(),
+        state.config.server.allow_public_register,
     ));
 
     // Rate limiter: generous for GraphQL + REST
@@ -87,6 +88,9 @@ pub fn build_router(state: AppState, graphql_schema: GraphqlSchema) -> Router {
         ))
         .routes(utoipa_axum::routes!(
             user_management::infrastructure::http::handlers::update_role
+        ))
+        .routes(utoipa_axum::routes!(
+            user_management::infrastructure::http::handlers::create_user
         ))
         .with_state(auth_service);
 
