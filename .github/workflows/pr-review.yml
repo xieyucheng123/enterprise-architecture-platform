@@ -44,13 +44,13 @@ jobs:
           HEAD_SHA=$(echo "$PR_INFO" | python3 -c "import sys,json; print(json.load(sys.stdin)['head_sha'])")
 
           echo "Dispatching auto-fix for PR #$PR_NUMBER (branch: $HEAD_BRANCH)"
-          echo "max_iterations=6 (3 original + 3 continue)"
+          echo "max_iterations=20 (10 original + 10 continue)"
 
           GH_TOKEN="$DISPATCH_TOKEN" gh workflow run pr-auto-fix.yml \
             -f pr_number="$PR_NUMBER" \
             -f head_branch="$HEAD_BRANCH" \
             -f head_sha="$HEAD_SHA" \
-            -f max_iterations="6" || echo "Failed to dispatch auto-fix"
+            -f max_iterations="20" || echo "Failed to dispatch auto-fix"
 
       - name: React to comment
         env:
