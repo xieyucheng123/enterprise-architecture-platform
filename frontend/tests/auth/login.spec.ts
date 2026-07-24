@@ -11,7 +11,7 @@ test.describe('Authentication - Login', () => {
     await page.goto('/login');
     
     await expect(page.getByText('企业架构平台')).toBeVisible();
-    await expect(page.getByText('登录或注册以继续')).toBeVisible();
+    await expect(page.getByText('登录以继续')).toBeVisible();
     
     await page.fill('input[type="email"]', TEST_EMAIL);
     await page.fill('input[type="password"]', TEST_PASSWORD);
