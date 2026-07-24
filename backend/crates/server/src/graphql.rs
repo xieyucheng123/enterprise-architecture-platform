@@ -8,12 +8,17 @@ use user_management::infrastructure::persistence::entities::{
 };
 use business_architecture::infrastructure::persistence::entities::{
     business_capability, business_process, capability_process, process_step, stage_capability,
-    value_stream, value_stream_stage,
+    value_stream, value_stream_stage, space, space_member, space_invitation,
 };
 use business_architecture::application::value_stream_service::ValueStreamService;
+use business_architecture::application::space_service::SpaceService;
 use business_architecture::domain::value_stream::entity::ValueStream as DomainValueStream;
+use business_architecture::domain::value_stream::repository::ValueStreamRepository;
+use business_architecture::domain::space::entity::{Space as DomainSpace, SpaceMember as DomainSpaceMember};
 use business_architecture::infrastructure::persistence::value_stream_repo::SeaOrmValueStreamRepo;
+use business_architecture::infrastructure::persistence::space_repo::{SeaOrmSpaceRepo, SeaOrmMembershipRepo};
 use shared_common::enums::ValueStreamImportance;
+use shared_common::enums::SpaceRole;
 
 pub type GraphqlSchema = async_graphql::dynamic::Schema;
 
@@ -33,6 +38,16 @@ const USER_ENTITIES: &[&str] = &[
     "users",
     "refresh_tokens",
     "oauth_authorization_codes",
+];
+
+/// Entities whose membership/identity data should not be exposed to anonymous
+/// readers. Reading these requires an authenticated (admin) session.
+const PRIVATE_READ_ENTITIES: &[&str] = &[
+    "users",
+    "refresh_tokens",
+    "oauth_authorization_codes",
+    "space_members",
+    "space_invitations",
 ];
 
 /// Fields hidden from all users (including Admin) in queries.
@@ -62,17 +77,20 @@ impl LifecycleHooksInterface for GraphqlAuthGuard {
 
         match action {
             OperationType::Read => {
-                let Some(claims) = claims else {
-                    return GuardAction::Block(Some("Authentication required.".to_string()));
-                };
-                let role = claims.user_role();
-
-                if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
-                    return GuardAction::Block(Some(
-                        "Only admins can read user records.".to_string(),
-                    ));
+                // Anonymous users may read spaces and business architecture entities
+                // (case-showcase / public read). Membership and user entities require
+                // an authenticated session; user records additionally require admin.
+                if PRIVATE_READ_ENTITIES.contains(&entity) {
+                    let Some(claims) = claims else {
+                        return GuardAction::Block(Some("Authentication required.".to_string()));
+                    };
+                    let role = claims.user_role();
+                    if USER_ENTITIES.contains(&entity) && !role.can_manage_users() {
+                        return GuardAction::Block(Some(
+                            "Only admins can read user records.".to_string(),
+                        ));
+                    }
                 }
-
                 GuardAction::Allow
             }
 
@@ -382,6 +400,7 @@ fn domain_vs_to_model(vs: &DomainValueStream) -> value_stream::Model {
         created_at: vs.created_at,
         updated_at: vs.updated_at,
         deleted_at: vs.deleted_at,
+        space_id: vs.space_id,
     }
 }
 
@@ -431,6 +450,24 @@ fn parse_importance(s: &str) -> async_graphql::Result<ValueStreamImportance> {
     }
 }
 
+/// Require the actor to be a member (editor/owner) of the given space, or an admin.
+/// This enforces the space-level ACL that the coarse entity_guard cannot.
+async fn ensure_space_edit_access(
+    ctx: &async_graphql::dynamic::ResolverContext<'_>,
+    db: &DatabaseConnection,
+    space_id: Uuid,
+) -> async_graphql::Result<()> {
+    let claims = require_claims(ctx)?;
+    let service = SpaceService::new(
+        SeaOrmSpaceRepo::new(db.clone()),
+        SeaOrmMembershipRepo::new(db.clone()),
+    );
+    service
+        .ensure_can_edit(space_id, claims.user_id, claims.user_role())
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))
+}
+
 /// Register custom ValueStream mutations that go through the domain model.
 /// These replace seaography's auto-generated CRUD mutations for value_stream.
 fn register_value_stream_domain_mutations(builder: &mut Builder) {
@@ -446,15 +483,20 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
 
                 let db = ctx.data::<DatabaseConnection>()?;
 
+                let space_id_str = ctx.args.try_get("spaceId")?.string()?;
+                let space_id = Uuid::parse_str(space_id_str)
+                    .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
                 let name = ctx.args.try_get("name")?.string()?.to_owned();
                 let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
                 let business_version = ctx.args.try_get("businessVersion")?.string()?.to_owned();
                 let importance = parse_importance(ctx.args.try_get("importance")?.enum_name()?)?;
 
+                ensure_space_edit_access(&ctx, db, space_id).await?;
+
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
                 let service = ValueStreamService::new(repo);
                 let vs = service
-                    .create(name, description, business_version, importance)
+                    .create(space_id, name, description, business_version, importance)
                     .await
                     .map_err(|e| async_graphql::Error::new(e.to_string()))?;
 
@@ -463,6 +505,7 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
             })
         },
     )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
     .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)))
     .argument(InputValue::new("businessVersion", TypeRef::named_nn(TypeRef::STRING)))
@@ -496,6 +539,14 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 };
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
+                // Enforce space-level ACL: look up the target's space before mutating.
+                let existing = repo
+                    .find_by_id(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
                 let service = ValueStreamService::new(repo);
                 let vs = service
                     .update(id, name, description, importance)
@@ -529,6 +580,14 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                     .map_err(|e| async_graphql::Error::new(format!("Invalid UUID: {e}")))?;
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
+                // Enforce space-level ACL before archiving.
+                let existing = repo
+                    .find_by_id(id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
                 let service = ValueStreamService::new(repo);
                 service
                     .archive(id)
@@ -562,6 +621,14 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
                 let new_description = ctx.args.get("newDescription").and_then(|v| v.string().ok()).map(|s| s.to_owned());
 
                 let repo = SeaOrmValueStreamRepo::new(db.clone());
+                // Enforce space-level ACL before creating a new version.
+                let existing = repo
+                    .find_by_id(current_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                    .ok_or_else(|| async_graphql::Error::new("Value stream not found."))?;
+                ensure_space_edit_access(&ctx, db, existing.space_id).await?;
+
                 let service = ValueStreamService::new(repo);
                 let vs = service
                     .create_version(current_id, new_version, new_name, new_description)
@@ -579,6 +646,193 @@ fn register_value_stream_domain_mutations(builder: &mut Builder) {
     .argument(InputValue::new("newDescription", TypeRef::named(TypeRef::STRING)));
 
     builder.mutations.push(create_version_field);
+}
+
+// ============================================================================
+// Custom Space Domain Mutations
+// ============================================================================
+
+fn domain_space_to_model(s: &DomainSpace) -> space::Model {
+    space::Model {
+        id: s.id,
+        name: s.name.clone(),
+        description: s.description.clone(),
+        created_at: s.created_at,
+        updated_at: s.updated_at,
+        deleted_at: s.deleted_at,
+    }
+}
+
+fn domain_member_to_model(m: &DomainSpaceMember) -> space_member::Model {
+    space_member::Model {
+        space_id: m.space_id,
+        user_id: m.user_id,
+        role: match m.role {
+            SpaceRole::Owner => "owner".to_owned(),
+            SpaceRole::Editor => "editor".to_owned(),
+        },
+        created_at: m.created_at,
+        updated_at: m.updated_at,
+    }
+}
+
+/// Require an authenticated session and return the claims.
+fn require_claims<'a>(ctx: &'a async_graphql::dynamic::ResolverContext<'a>) -> async_graphql::Result<&'a crate::middleware::Claims> {
+    ctx.data_opt::<crate::middleware::Claims>()
+        .ok_or_else(|| async_graphql::Error::new("Authentication required for mutations."))
+}
+
+fn parse_space_role(s: &str) -> async_graphql::Result<SpaceRole> {
+    SpaceRole::from_str(s)
+        .ok_or_else(|| async_graphql::Error::new(format!("Invalid space role: {s}")))
+}
+
+fn parse_uuid_arg<'a>(ctx: &'a async_graphql::dynamic::ResolverContext<'a>, name: &str) -> async_graphql::Result<Uuid> {
+    let s = ctx.args.try_get(name)?.string()?;
+    Uuid::parse_str(s).map_err(|e| async_graphql::Error::new(format!("Invalid UUID for {name}: {e}")))
+}
+
+fn register_space_domain_mutations(builder: &mut Builder) {
+    use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, TypeRef};
+
+    // ── spaceCreate ────────────────────────────────────────────────────
+    let create = Field::new(
+        "spaceCreate",
+        TypeRef::named_nn("Organizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let name = ctx.args.try_get("name")?.string()?.to_owned();
+                let description = ctx.args.get("description").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                let space_obj = service
+                    .create_space(claims.user_id, claims.user_role(), name, description)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(domain_space_to_model(&space_obj))))
+            })
+        },
+    )
+    .argument(InputValue::new("name", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(create);
+
+    // ── spaceUpdate ────────────────────────────────────────────────────
+    let update = Field::new(
+        "spaceUpdate",
+        TypeRef::named_nn("Organizations"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "id")?;
+                let name = ctx.args.get("name").and_then(|v| v.string().ok()).map(|s| s.to_owned());
+                let description = match ctx.args.get("description") {
+                    Some(v) if v.is_null() => Some(None),
+                    Some(v) => v.string().ok().map(|s| Some(s.to_owned())),
+                    None => None,
+                };
+
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                let space_obj = service
+                    .update_space(space_id, claims.user_id, claims.user_role(), name, description)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(domain_space_to_model(&space_obj))))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("name", TypeRef::named(TypeRef::STRING)))
+    .argument(InputValue::new("description", TypeRef::named(TypeRef::STRING)));
+    builder.mutations.push(update);
+
+    // ── spaceArchive ───────────────────────────────────────────────────
+    let archive = Field::new(
+        "spaceArchive",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "id")?;
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                service
+                    .archive_space(space_id, claims.user_id, claims.user_role())
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(archive);
+
+    // ── spaceAddMember ─────────────────────────────────────────────────
+    let add_member = Field::new(
+        "spaceAddMember",
+        TypeRef::named_nn("SpaceMembers"),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let user_id = parse_uuid_arg(&ctx, "userId")?;
+                let role = parse_space_role(ctx.args.try_get("role")?.enum_name()?)?;
+
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                let member = service
+                    .add_member(space_id, claims.user_id, claims.user_role(), user_id, role)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(FieldValue::owned_any(domain_member_to_model(&member))))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("userId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("role", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(add_member);
+
+    // ── spaceRemoveMember ──────────────────────────────────────────────
+    let remove_member = Field::new(
+        "spaceRemoveMember",
+        TypeRef::named_nn(TypeRef::BOOLEAN),
+        |ctx| {
+            FieldFuture::new(async move {
+                let claims = require_claims(&ctx)?;
+                let db = ctx.data::<DatabaseConnection>()?;
+                let space_id = parse_uuid_arg(&ctx, "spaceId")?;
+                let user_id = parse_uuid_arg(&ctx, "userId")?;
+                let service = SpaceService::new(
+                    SeaOrmSpaceRepo::new(db.clone()),
+                    SeaOrmMembershipRepo::new(db.clone()),
+                );
+                service
+                    .remove_member(space_id, claims.user_id, claims.user_role(), user_id)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(Some(async_graphql::Value::Boolean(true)))
+            })
+        },
+    )
+    .argument(InputValue::new("spaceId", TypeRef::named_nn(TypeRef::STRING)))
+    .argument(InputValue::new("userId", TypeRef::named_nn(TypeRef::STRING)));
+    builder.mutations.push(remove_member);
 }
 
 // ============================================================================
@@ -613,8 +867,18 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
     register_entity_with_mutations::<capability_process::Entity, capability_process::ActiveModel>(&mut builder);
     register_entity_with_mutations::<stage_capability::Entity, stage_capability::ActiveModel>(&mut builder);
 
+    // ── Spaces (reuses `organizations` table) + membership/invitations ──
+    // Queries are public (anonymous case-showcase); writes go through custom
+    // domain mutations registered below.
+    register_entity::<space::Entity>(&mut builder);
+    register_entity::<space_member::Entity>(&mut builder);
+    register_entity::<space_invitation::Entity>(&mut builder);
+
     // ── Custom domain mutations for ValueStream ───────────────────────
     register_value_stream_domain_mutations(&mut builder);
+
+    // ── Custom domain mutations for Space + membership ────────────────
+    register_space_domain_mutations(&mut builder);
 
     // ── DataLoaders ───────────────────────────────────────────────────
     builder = builder
@@ -637,7 +901,13 @@ pub async fn build_graphql_schema(db: &DatabaseConnection) -> anyhow::Result<Gra
         .register_entity_dataloader_one_to_one(capability_process::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_many(capability_process::Entity, tokio::spawn)
         .register_entity_dataloader_one_to_one(stage_capability::Entity, tokio::spawn)
-        .register_entity_dataloader_one_to_many(stage_capability::Entity, tokio::spawn);
+        .register_entity_dataloader_one_to_many(stage_capability::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(space::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(space::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(space_member::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(space_member::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_one(space_invitation::Entity, tokio::spawn)
+        .register_entity_dataloader_one_to_many(space_invitation::Entity, tokio::spawn);
 
     let schema = builder.schema_builder()
         .data(db.clone())
