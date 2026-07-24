@@ -19,6 +19,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
 env:
   ACR_REGISTRY: crpi-fswclfmtgfktdkq7.cn-guangzhou.personal.cr.aliyuncs.com
   ACR_NAMESPACE: eap-app
@@ -114,7 +118,7 @@ jobs:
 
       - name: Login to ACR
         run: |
-          podman login -u "${{ secrets.ACR_USERNAME }}" -p "${{ secrets.ACR_PASSWORD }}" "${{ secrets.ACR_REGISTRY }}"
+          podman login -u "${{ secrets.ACR_USERNAME }}" -p "${{ secrets.ACR_PASSWORD }}" "${{ env.ACR_REGISTRY }}"
 
       - name: Deploy with podman
         run: |
