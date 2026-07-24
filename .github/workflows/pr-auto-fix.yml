@@ -49,7 +49,7 @@ jobs:
           PR_NUMBER: ${{ inputs.pr_number }}
           HEAD_BRANCH: ${{ inputs.head_branch }}
           HEAD_SHA: ${{ inputs.head_sha }}
-          MAX_ITERATIONS: ${{ inputs.max_iterations || '3' }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations || '10' }}
         run: |
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "max_iterations=$MAX_ITERATIONS" >> $GITHUB_OUTPUT
