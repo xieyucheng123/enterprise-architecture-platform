@@ -16,10 +16,10 @@ on:
         required: true
         type: string
       max_iterations:
-        description: "Max auto-fix iterations (default 3)"
+        description: "Max auto-fix iterations (default 10)"
         required: false
         type: string
-        default: "3"
+        default: "10"
 
 permissions:
   contents: write
