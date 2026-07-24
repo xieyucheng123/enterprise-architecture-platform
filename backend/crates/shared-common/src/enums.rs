@@ -84,12 +84,13 @@ pub enum LifecycleStatus {
 ///
 /// Stored in the `capability_status` column of `business_capabilities`
 /// (the `status` column is already used by [`LifecycleStatus`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema, Default)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::N(20))")]
 #[serde(rename_all = "snake_case")]
 pub enum CapabilityStatus {
     #[sea_orm(string_value = "active")]
     #[serde(rename = "active")]
+    #[default]
     Active,
     #[sea_orm(string_value = "inactive")]
     #[serde(rename = "inactive")]
@@ -97,12 +98,6 @@ pub enum CapabilityStatus {
     #[sea_orm(string_value = "draft")]
     #[serde(rename = "draft")]
     Draft,
-}
-
-impl Default for CapabilityStatus {
-    fn default() -> Self {
-        CapabilityStatus::Active
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, EnumIter, DeriveActiveEnum, ToSchema)]
@@ -166,6 +161,12 @@ impl UserRole {
     pub fn can_transfer_owner(&self) -> bool {
         matches!(self, UserRole::Admin)
     }
+    /// Parses a role from its snake_case string representation.
+    ///
+    /// Returns `Option` rather than implementing `std::str::FromStr` because
+    /// callers treat an unknown role as a graceful fallback (→ `Viewer`), not
+    /// a hard error.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "admin" => Some(UserRole::Admin),

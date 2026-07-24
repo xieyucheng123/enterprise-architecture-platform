@@ -21,13 +21,6 @@ pub type GraphqlSchema = async_graphql::dynamic::Schema;
 // GraphQL Auth Guard (seaography LifecycleHooks)
 // ============================================================================
 
-/// Entities that support ownership (have `created_by` field).
-const OWNED_ENTITIES: &[&str] = &[
-    "business_capabilities",
-    "business_processes",
-    "value_streams",
-];
-
 /// User-management entities: only Admin can manage users.
 const USER_ENTITIES: &[&str] = &[
     "users",
@@ -248,16 +241,16 @@ impl tower::Service<axum::extract::Request> for GraphQLService {
         let endpoint = self.endpoint.clone();
 
         Box::pin(async move {
-            match req.method() {
+            match *req.method() {
                 // GET → GraphiQL interactive IDE
-                &axum::http::Method::GET => {
+                axum::http::Method::GET => {
                     let html = async_graphql::http::GraphiQLSource::build()
                         .endpoint(&endpoint)
                         .finish();
                     Ok(axum::response::Html(html).into_response())
                 }
                 // POST → Execute GraphQL query/mutation
-                &axum::http::Method::POST => {
+                axum::http::Method::POST => {
                     let has_jwt =
                         crate::graphql::extract_claims_from_headers(req.headers(), &jwt_secret);
 
