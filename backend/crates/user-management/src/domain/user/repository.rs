@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use shared_common::enums::UserRole;
 use uuid::Uuid;
 
 use super::entity::User;
@@ -15,4 +16,5 @@ pub trait UserRepository: Send + Sync + 'static {
         page: u64,
         per_page: u64,
     ) -> Result<(Vec<User>, u64), DomainError>;
+    async fn count_by_role(&self, role: UserRole) -> Result<u64, DomainError>;
 }

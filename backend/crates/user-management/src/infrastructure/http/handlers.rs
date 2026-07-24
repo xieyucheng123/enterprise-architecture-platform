@@ -9,7 +9,7 @@ use axum::Json;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use sea_orm::DatabaseConnection;
+use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, Set, TransactionTrait};
 use sha2::{Digest, Sha256};
 use shared_common::enums::{UserRole, UserStatus};
 use uuid::Uuid;
@@ -17,7 +17,7 @@ use validator::Validate;
 
 use crate::application::login::LoginInput;
 use crate::application::oauth::{AuthorizeInput, TokenInput, TokenOutput};
-use crate::application::register::{AuthOutput, RegisterInput, UserDto};
+use crate::application::register::{AuthOutput, CreateUserInput, RegisterInput, UserDto};
 use crate::application::token::{Claims, RefreshInput, RefreshOutput};
 use crate::domain::auth::entity::{OAuthAuthorizationCode, RefreshToken};
 use crate::domain::auth::repository::{AuthCodeRepository, RefreshTokenRepository};
@@ -26,6 +26,7 @@ use crate::domain::user::entity::User;
 use crate::domain::user::repository::UserRepository;
 use crate::infrastructure::http::dto::{user_to_dto, ErrorResponse, LogoutInput};
 use crate::infrastructure::persistence::auth_repo::{SeaOrmAuthCodeRepo, SeaOrmRefreshTokenRepo};
+use crate::infrastructure::persistence::entities::user;
 use crate::infrastructure::persistence::user_repo::SeaOrmUserRepo;
 
 pub struct OAuthClientConfig {
@@ -39,6 +40,7 @@ pub struct AuthService {
     jwt_expires_in: u64,
     refresh_expires_in: u64,
     oauth_clients: Vec<OAuthClientConfig>,
+    allow_public_register: bool,
 }
 
 impl AuthService {
@@ -48,6 +50,7 @@ impl AuthService {
         jwt_expires_in: u64,
         refresh_expires_in: u64,
         oauth_clients: Vec<OAuthClientConfig>,
+        allow_public_register: bool,
     ) -> Self {
         Self {
             db,
@@ -55,11 +58,16 @@ impl AuthService {
             jwt_expires_in,
             refresh_expires_in,
             oauth_clients,
+            allow_public_register,
         }
     }
 
     fn user_repo(&self) -> SeaOrmUserRepo {
         SeaOrmUserRepo::new(self.db.clone())
+    }
+
+    fn db(&self) -> &DatabaseConnection {
+        &self.db
     }
 
     fn refresh_token_repo(&self) -> SeaOrmRefreshTokenRepo {
@@ -75,7 +83,23 @@ impl AuthService {
     }
 }
 
+#[derive(Debug)]
 pub struct ApiError(pub shared_common::AppError);
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<sea_orm::TransactionError<ApiError>> for ApiError {
+    fn from(e: sea_orm::TransactionError<ApiError>) -> Self {
+        match e {
+            sea_orm::TransactionError::Connection(db_err) => ApiError(db_err.into()),
+            sea_orm::TransactionError::Transaction(api_err) => api_err,
+        }
+    }
+}
 
 impl From<DomainError> for ApiError {
     fn from(e: DomainError) -> Self {
@@ -228,6 +252,7 @@ fn validate_input<T: Validate>(input: &T) -> Result<(), ApiError> {
     responses(
         (status = 201, description = "注册成功", body = AuthOutput),
         (status = 400, description = "参数错误"),
+        (status = 403, description = "公开注册已关闭"),
         (status = 409, description = "邮箱已存在"),
     )
 )]
@@ -235,6 +260,13 @@ pub async fn register(
     State(service): State<Arc<AuthService>>,
     Json(input): Json<RegisterInput>,
 ) -> Result<Json<AuthOutput>, ApiError> {
+    let allow = service.allow_public_register;
+    if !allow {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "public registration is disabled".into(),
+        )));
+    }
+
     validate_input(&input)?;
 
     let repo = service.user_repo();
@@ -259,6 +291,61 @@ pub async fn register(
         expires_in: service.jwt_expires_in,
         user: user_to_dto(&user),
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/users",
+    tag = "auth",
+    request_body = CreateUserInput,
+    responses(
+        (status = 201, description = "用户创建成功", body = UserDto),
+        (status = 400, description = "参数错误"),
+        (status = 401, description = "未认证"),
+        (status = 403, description = "无权限"),
+        (status = 409, description = "邮箱已存在"),
+    )
+)]
+pub async fn create_user(
+    State(service): State<Arc<AuthService>>,
+    headers: HeaderMap,
+    Json(input): Json<CreateUserInput>,
+) -> Result<Json<UserDto>, ApiError> {
+    let token = extract_bearer_token(&headers)?;
+    let claims = verify_jwt(&service.jwt_secret, &token)?;
+
+    let actor_role = UserRole::from_str(&claims.role)
+        .ok_or_else(|| ApiError(shared_common::AppError::Unauthorized("invalid token role".into())))?;
+
+    if !actor_role.can_manage_users() {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "only admins can create users".into(),
+        )));
+    }
+
+    validate_input(&input)?;
+
+    let repo = service.user_repo();
+    if repo.find_by_email(&input.email).await?.is_some() {
+        return Err(ApiError(shared_common::AppError::Conflict("email already exists".into())));
+    }
+
+    let role = match input.role.as_deref() {
+        Some("admin") => UserRole::Admin,
+        Some("architect") => UserRole::Architect,
+        Some("viewer") | None => UserRole::Viewer,
+        Some(other) => {
+            return Err(ApiError(shared_common::AppError::BadRequest(
+                format!("invalid role: '{}'. expected: admin, architect, viewer", other),
+            )));
+        }
+    };
+
+    let password_hash = hash_password(&input.password)?;
+    let user = User::new(input.email, input.name, password_hash, role);
+    let saved = repo.save(&user).await?;
+
+    Ok(Json(user_to_dto(&saved)))
 }
 
 #[utoipa::path(
@@ -599,8 +686,55 @@ pub async fn update_role(
         .await?
         .ok_or_else(|| ApiError(shared_common::AppError::NotFound("user not found".into())))?;
 
-    user.set_role(new_role);
-    let saved = repo.save(&user).await?;
+    // Guard against lockout: refuse self-demotion outright so an admin cannot
+    // accidentally strip their own access.
+    if user.role.is_admin() && !new_role.is_admin() && input.user_id == claims.user_id {
+        return Err(ApiError(shared_common::AppError::Forbidden(
+            "cannot demote your own admin role".into(),
+        )));
+    }
 
-    Ok(Json(user_to_dto(&saved)))
+    // Atomically check the last-admin guard and apply the role change inside a
+    // single transaction to eliminate the TOCTOU race between counting admins
+    // and saving the demotion.
+    let is_demotion = user.role.is_admin() && !new_role.is_admin();
+    let db = service.db();
+
+    let saved = db
+        .transaction::<_, user::Model, ApiError>(|txn| {
+            Box::pin(async move {
+                if is_demotion {
+                    let admin_count = user::Entity::find()
+                        .filter(user::Column::Role.eq(UserRole::Admin))
+                        .filter(user::Column::DeletedAt.is_null())
+                        .count(txn)
+                        .await?;
+                    if admin_count <= 1 {
+                        return Err(ApiError(shared_common::AppError::Forbidden(
+                            "cannot demote the last remaining admin".into(),
+                        )));
+                    }
+                }
+
+                let model = user::Entity::find_by_id(user.id)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| {
+                        ApiError(shared_common::AppError::NotFound("user not found".into()))
+                    })?;
+
+                let mut active: user::ActiveModel = model.into();
+                active.role = Set(new_role);
+                active.updated_at = Set(Utc::now());
+                let updated = active.update(txn).await?;
+
+                Ok(updated)
+            })
+        })
+        .await?;
+
+    user = saved.into();
+    user.set_role(new_role);
+
+    Ok(Json(user_to_dto(&user)))
 }
