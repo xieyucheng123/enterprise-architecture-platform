@@ -14,8 +14,8 @@ import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react'
 
 // Domain-driven custom mutations (replace seaography auto-CRUD)
 const CREATE_VALUE_STREAM = gql`
-  mutation ValueStreamCreate($name: String!, $description: String!, $businessVersion: String!, $importance: String!) {
-    valueStreamCreate(name: $name, description: $description, businessVersion: $businessVersion, importance: $importance) {
+  mutation ValueStreamCreate($spaceId: String!, $name: String!, $description: String!, $businessVersion: String!, $importance: String!) {
+    valueStreamCreate(spaceId: $spaceId, name: $name, description: $description, businessVersion: $businessVersion, importance: $importance) {
       id name description businessVersion status importance logicalId
     }
   }
@@ -54,10 +54,11 @@ interface ValueStream {
   logicalId: string
 }
 
-export function ValueStreamCrudDialog({ open, onOpenChange, editing }: {
+export function ValueStreamCrudDialog({ open, onOpenChange, editing, spaceId }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   editing: ValueStream | null
+  spaceId?: string
 }) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -101,17 +102,18 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing }: {
             description,
             importance,
           },
-          refetchQueries: [{ query: GET_VALUE_STREAMS }],
+          refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
         })
       } else {
         await createMut({
           variables: {
+            spaceId,
             name,
             description,
             businessVersion: version,
             importance,
           },
-          refetchQueries: [{ query: GET_VALUE_STREAMS }],
+          refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
         })
       }
       onOpenChange(false)
@@ -172,9 +174,10 @@ export function ValueStreamCrudDialog({ open, onOpenChange, editing }: {
   )
 }
 
-export function ValueStreamDeleteDialog({ item, onConfirm }: {
+export function ValueStreamDeleteDialog({ item, onConfirm, spaceId }: {
   item: ValueStream | null
   onConfirm: () => void
+  spaceId?: string
 }) {
   const [archiveMut] = useMutation(ARCHIVE_VALUE_STREAM)
   const [loading, setLoading] = useState(false)
@@ -185,7 +188,7 @@ export function ValueStreamDeleteDialog({ item, onConfirm }: {
     try {
       await archiveMut({
         variables: { id: item.id },
-        refetchQueries: [{ query: GET_VALUE_STREAMS }],
+        refetchQueries: [{ query: GET_VALUE_STREAMS, variables: { spaceId } }],
       })
       onConfirm()
     } catch (err) {
